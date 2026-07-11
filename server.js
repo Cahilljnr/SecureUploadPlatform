@@ -1,52 +1,52 @@
 require('dotenv').config();
-const express      = require('express');
-const multer       = require('multer');
-const path         = require('path');
-const fs           = require('fs');
-const crypto       = require('crypto');
+const express    = require('express');
+const multer     = require('multer');
+const path       = require('path');
+const fs         = require('fs');
+const crypto     = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const cors         = require('cors');
-const helmet       = require('helmet');
-const rateLimit    = require('express-rate-limit');
-const bcrypt       = require('bcryptjs');
-const session      = require('express-session');
-const RedisStore   = require('connect-redis').default;
-const Redis        = require('ioredis');
+const cors       = require('cors');
+const helmet     = require('helmet');
+const rateLimit  = require('express-rate-limit');
+const bcrypt     = require('bcryptjs');
+const session    = require('express-session');
+const RedisStore = require('connect-redis').default;
+const Redis      = require('ioredis');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-// ── Data directories ──────────────────────────────────────────────────────────
-const DATA_DIR     = path.join(__dirname, 'data');
-const UPLOADS_DIR  = path.join(__dirname, 'uploads');
-const USERS_FILE   = path.join(DATA_DIR, 'users.json');
+// ── Redis client ──────────────────────────────────────────────────────────────
+const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const redisClient = new Redis(redisUrl, {
+  tls: redisUrl.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
+  maxRetriesPerRequest: null
+});
+redisClient.on('error',   err => console.error('Redis error:', err));
+redisClient.on('connect', ()  => console.log('✅ Redis connected'));
 
-[DATA_DIR, UPLOADS_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
-if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify([]));
+// ── Uploads dir (local dev only; ephemeral on Render) ────────────────────────
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-// ── Helpers: users store ──────────────────────────────────────────────────────
-function readUsers() {
-  try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')); }
-  catch { return []; }
+// ── Helpers: users in Redis ───────────────────────────────────────────────────
+async function findUser(username) {
+  const data = await redisClient.get(`user:${username.toLowerCase()}`);
+  return data ? JSON.parse(data) : null;
 }
-function writeUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
-function findUser(username) {
-  return readUsers().find(u => u.username.toLowerCase() === username.toLowerCase());
+async function saveUser(user) {
+  const str = JSON.stringify(user);
+  await redisClient.set(`user:${user.username.toLowerCase()}`, str);
+  await redisClient.set(`userid:${user.id}`, str);
 }
 
-// ── Helpers: per-user manifest ────────────────────────────────────────────────
-function manifestPath(userId) {
-  return path.join(DATA_DIR, `manifest_${userId}.json`);
+// ── Helpers: per-user manifest in Redis ──────────────────────────────────────
+async function readManifest(userId) {
+  const data = await redisClient.get(`manifest:${userId}`);
+  return data ? JSON.parse(data) : [];
 }
-function readManifest(userId) {
-  const f = manifestPath(userId);
-  try { return JSON.parse(fs.readFileSync(f, 'utf8')); }
-  catch { return []; }
-}
-function writeManifest(userId, data) {
-  fs.writeFileSync(manifestPath(userId), JSON.stringify(data, null, 2));
+async function writeManifest(userId, data) {
+  await redisClient.set(`manifest:${userId}`, JSON.stringify(data));
 }
 
 // ── Server-side envelope encryption ──────────────────────────────────────────
@@ -60,6 +60,9 @@ function serverEncrypt(buffer) {
 }
 
 // ── Security middleware ───────────────────────────────────────────────────────
+// Required on Render (sits behind a proxy) for rate limiter and secure cookies
+app.set('trust proxy', 1);
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -77,22 +80,16 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ── Session ───────────────────────────────────────────────────────────────────
-const redisClient = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-  tls: process.env.REDIS_URL ? { rejectUnauthorized: false } : undefined,
-  maxRetriesPerRequest: null
-});
-
-redisClient.on('error', err => console.error('Redis error:', err));
-
 app.use(session({
   store: new RedisStore({ client: redisClient }),
-  secret:            process.env.SESSION_SECRET || 'securevault-session-secret-change-me',
+  secret:            process.env.SESSION_SECRET || 'securevault-dev-secret',
   resave:            false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     secure:   process.env.NODE_ENV === 'production',
-    maxAge:   7 * 24 * 60 * 60 * 1000  // 7 days in ms
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    maxAge:   7 * 24 * 60 * 60 * 1000  // 7 days
   }
 }));
 
@@ -120,41 +117,26 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
 
     if (!username || !password || !fullname)
       return res.status(400).json({ error: 'All fields are required.' });
-
     if (username.length < 3 || username.length > 30)
       return res.status(400).json({ error: 'Username must be 3–30 characters.' });
-
     if (!/^[a-zA-Z0-9_]+$/.test(username))
       return res.status(400).json({ error: 'Username can only contain letters, numbers, and underscores.' });
-
     if (password.length < 6)
       return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-
-    if (findUser(username))
+    if (await findUser(username))
       return res.status(409).json({ error: 'Username already taken.' });
 
-    const hashed  = await bcrypt.hash(password, 12);
-    const userId  = uuidv4();
-    const users   = readUsers();
+    const hashed = await bcrypt.hash(password, 12);
+    const userId = uuidv4();
+    await saveUser({ id: userId, username: username.trim(), fullname: fullname.trim(), password: hashed, createdAt: new Date().toISOString() });
 
-    users.push({
-      id:         userId,
-      username:   username.trim(),
-      fullname:   fullname.trim(),
-      password:   hashed,
-      createdAt:  new Date().toISOString()
-    });
-    writeUsers(users);
-
-    // Auto-login after register
     req.session.userId   = userId;
     req.session.username = username.trim();
     req.session.fullname = fullname.trim();
 
-    res.status(201).json({
-      success:  true,
-      message:  'Account created successfully.',
-      user:     { username: username.trim(), fullname: fullname.trim() }
+    req.session.save(err => {
+      if (err) { console.error('Session save error:', err); return res.status(500).json({ error: 'Registration failed.' }); }
+      res.status(201).json({ success: true, message: 'Account created successfully.', user: { username: username.trim(), fullname: fullname.trim() } });
     });
 
   } catch (err) {
@@ -170,7 +152,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     if (!username || !password)
       return res.status(400).json({ error: 'Username and password are required.' });
 
-    const user = findUser(username);
+    const user = await findUser(username);
     if (!user) return res.status(401).json({ error: 'Invalid username or password.' });
 
     const match = await bcrypt.compare(password, user.password);
@@ -180,9 +162,9 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     req.session.username = user.username;
     req.session.fullname = user.fullname;
 
-    res.json({
-      success: true,
-      user:    { username: user.username, fullname: user.fullname }
+    req.session.save(err => {
+      if (err) { console.error('Session save error:', err); return res.status(500).json({ error: 'Login failed.' }); }
+      res.json({ success: true, user: { username: user.username, fullname: user.fullname } });
     });
 
   } catch (err) {
@@ -193,18 +175,13 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
 
 // POST /api/auth/logout
 app.post('/api/auth/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.json({ success: true });
-  });
+  req.session.destroy(() => res.json({ success: true }));
 });
 
-// GET /api/auth/me – check current session
+// GET /api/auth/me
 app.get('/api/auth/me', (req, res) => {
   if (req.session && req.session.userId) {
-    return res.json({
-      loggedIn: true,
-      user: { username: req.session.username, fullname: req.session.fullname }
-    });
+    return res.json({ loggedIn: true, user: { username: req.session.username, fullname: req.session.fullname } });
   }
   res.json({ loggedIn: false });
 });
@@ -216,12 +193,12 @@ const storage = multer.memoryStorage();
 const upload  = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
 
 // POST /api/upload
-app.post('/api/upload', requireAuth, uploadLimiter, upload.single('file'), (req, res) => {
+app.post('/api/upload', requireAuth, uploadLimiter, upload.single('file'), async (req, res) => {
   try {
     if (!req.file && !req.body.textPayload)
       return res.status(400).json({ error: 'No data received.' });
 
-    const id        = uuidv4();
+    const id = uuidv4();
     const timestamp = new Date().toISOString();
     let rawBuffer, originalName, mimeType;
 
@@ -236,12 +213,12 @@ app.post('/api/upload', requireAuth, uploadLimiter, upload.single('file'), (req,
     }
 
     const doubleEncrypted = serverEncrypt(rawBuffer);
-    const filename        = `${id}.enc`;
-    fs.writeFileSync(path.join(UPLOADS_DIR, filename), doubleEncrypted);
+    // Store encrypted file in Redis (base64 encoded)
+    await redisClient.set(`file:${id}`, doubleEncrypted.toString('base64'));
 
-    const manifest = readManifest(req.session.userId);
-    manifest.unshift({ id, filename, originalName, mimeType, size: rawBuffer.length, uploadedAt: timestamp, encrypted: true, layers: 2 });
-    writeManifest(req.session.userId, manifest);
+    const manifest = await readManifest(req.session.userId);
+    manifest.unshift({ id, originalName, mimeType, size: rawBuffer.length, uploadedAt: timestamp, encrypted: true, layers: 2 });
+    await writeManifest(req.session.userId, manifest);
 
     res.status(200).json({ success: true, id, message: 'Encrypted and stored.', uploadedAt: timestamp });
 
@@ -251,22 +228,22 @@ app.post('/api/upload', requireAuth, uploadLimiter, upload.single('file'), (req,
   }
 });
 
-// GET /api/uploads – current user's uploads only
-app.get('/api/uploads', requireAuth, (req, res) => {
-  const manifest = readManifest(req.session.userId);
+// GET /api/uploads
+app.get('/api/uploads', requireAuth, async (req, res) => {
+  const manifest = await readManifest(req.session.userId);
   res.json(manifest.map(({ id, originalName, mimeType, size, uploadedAt, encrypted, layers }) =>
     ({ id, originalName, mimeType, size, uploadedAt, encrypted, layers })
   ));
 });
 
 // GET /api/stats
-app.get('/api/stats', requireAuth, (req, res) => {
-  const manifest  = readManifest(req.session.userId);
+app.get('/api/stats', requireAuth, async (req, res) => {
+  const manifest  = await readManifest(req.session.userId);
   const totalSize = manifest.reduce((s, i) => s + (i.size || 0), 0);
   res.json({ totalUploads: manifest.length, totalSizeMB: (totalSize / (1024 * 1024)).toFixed(2) });
 });
 
-// ── Fallback – serve frontend ──────────────────────────────────────────────────
+// ── Fallback – serve frontend ─────────────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
