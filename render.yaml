@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: secure-upload-platform
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: SERVER_SECRET
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true

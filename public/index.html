@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SecureVault – Encrypted Upload Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header>
+    <div class="logo">
+      <span class="lock-icon">🔐</span>
+      <span class="brand">SecureVault</span>
+    </div>
+    <nav>
+      <a href="#upload-section">Upload</a>
+      <a href="#history-section">History</a>
+      <a href="#how-it-works">How It Works</a>
+    </nav>
+    <div class="header-user" id="headerUser">
+      <!-- Filled by JS -->
+    </div>
+  </header>
+
+  <!-- ── Hero ───────────────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="badge">🛡️ End-to-End Encrypted</div>
+      <h1>Upload Anything.<br /><span class="highlight">Keep It Private.</span></h1>
+      <p class="subtitle" id="heroWelcome">
+        Your files and data are encrypted <strong>in your browser</strong> using AES-256-GCM
+        before they ever leave your device — then encrypted again on the server.
+      </p>
+      <div class="hero-stats">
+        <div class="stat"><span id="stat-total">—</span><label>Your Uploads</label></div>
+        <div class="stat"><span id="stat-size">—</span><label>MB Secured</label></div>
+        <div class="stat"><span>AES-256</span><label>Encryption</label></div>
+      </div>
+    </div>
+    <div class="hero-art">
+      <div class="vault-graphic">
+        <div class="vault-ring r1"></div>
+        <div class="vault-ring r2"></div>
+        <div class="vault-ring r3"></div>
+        <div class="vault-center">🔒</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Upload Section ────────────────────────────────────────────────── -->
+  <section id="upload-section" class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2>Upload &amp; Encrypt</h2>
+        <p>Choose a file or enter text data. A unique encryption key is generated per upload.</p>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="file">📁 File Upload</button>
+        <button class="tab" data-tab="text">📝 Text / Data</button>
+      </div>
+
+      <div class="key-area">
+        <label for="encKey">Your Encryption Key (passphrase)</label>
+        <div class="key-input-row">
+          <input type="password" id="encKey" placeholder="Auto-generated or enter your own passphrase…" autocomplete="off" />
+          <button class="btn-icon" id="toggleKeyVis" title="Show/hide key">👁</button>
+          <button class="btn-icon" id="genKey" title="Generate random key">🔄</button>
+          <button class="btn-icon" id="copyKey" title="Copy key">📋</button>
+        </div>
+        <p class="key-warning">⚠️ Save this key! It is <strong>not stored anywhere</strong> — without it your data cannot be decrypted.</p>
+      </div>
+
+      <div id="tab-file" class="tab-content active">
+        <div class="drop-zone" id="dropZone">
+          <div class="drop-icon">📂</div>
+          <p>Drag &amp; drop files here, or <label for="fileInput" class="browse-link">browse</label></p>
+          <p class="drop-sub">Supports any file type · Max 100 MB per file</p>
+          <input type="file" id="fileInput" multiple hidden />
+        </div>
+        <div id="fileList" class="file-list"></div>
+      </div>
+
+      <div id="tab-text" class="tab-content">
+        <textarea id="textInput" rows="8" placeholder="Paste or type any text, JSON, credentials, notes, or sensitive data here…"></textarea>
+      </div>
+
+      <div class="upload-actions">
+        <button class="btn-primary" id="uploadBtn">
+          <span class="btn-icon-left">🔐</span> Encrypt &amp; Upload
+        </button>
+      </div>
+
+      <div id="progressArea" class="progress-area hidden">
+        <div class="progress-label">
+          <span id="progressText">Encrypting…</span>
+          <span id="progressPct">0%</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+
+      <div id="uploadResult" class="result-box hidden"></div>
+    </div>
+  </section>
+
+  <!-- ── How It Works ──────────────────────────────────────────────────── -->
+  <section id="how-it-works" class="section section-dark">
+    <div class="container">
+      <div class="section-header light">
+        <h2>How Encryption Works</h2>
+        <p>Two independent layers of AES-256-GCM protection</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h3>Key Derivation</h3>
+          <p>Your passphrase is run through PBKDF2 (100,000 iterations, SHA-256) to derive a strong 256-bit AES key — entirely in your browser.</p>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h3>Client Encryption</h3>
+          <p>Your file or text is encrypted with AES-256-GCM using the Web Crypto API before a single byte is sent to the server.</p>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h3>Server Encryption</h3>
+          <p>The already-encrypted blob receives a second AES-256-GCM layer using a secret server key. Two independent keys protect your data.</p>
+        </div>
+        <div class="step-arrow">→</div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <h3>Secure Storage</h3>
+          <p>Only the doubly-encrypted ciphertext is saved to disk — linked to your account. No plaintext, no readable keys.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Upload History ─────────────────────────────────────────────────── -->
+  <section id="history-section" class="section">
+    <div class="container">
+      <div class="section-header">
+        <h2>My Upload History</h2>
+        <p>Metadata only — contents remain encrypted and unreadable without your key.</p>
+      </div>
+      <div id="historyList" class="history-list">
+        <div class="loading-spinner">Loading…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Footer ─────────────────────────────────────────────────────────── -->
+  <footer>
+    <div class="container">
+      <p>🔐 <strong>SecureVault</strong> — End-to-End Encrypted Upload Platform</p>
+      <p class="footer-sub">AES-256-GCM · PBKDF2 · bcrypt · Zero-knowledge server storage</p>
+    </div>
+  </footer>
+
+  <script src="crypto.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
