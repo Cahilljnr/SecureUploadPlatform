@@ -10,6 +10,7 @@ const helmet       = require('helmet');
 const rateLimit    = require('express-rate-limit');
 const bcrypt       = require('bcryptjs');
 const session      = require('express-session');
+const FileStore    = require('session-file-store')(session);
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -75,14 +76,22 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ── Session ───────────────────────────────────────────────────────────────────
+const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
+if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+
 app.use(session({
+  store: new FileStore({
+    path:   SESSIONS_DIR,
+    ttl:    7 * 24 * 60 * 60,  // 7 days in seconds
+    reapInterval: 3600          // clean expired sessions every hour
+  }),
   secret:            process.env.SESSION_SECRET || 'securevault-session-secret-change-me',
   resave:            false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     secure:   process.env.NODE_ENV === 'production',
-    maxAge:   7 * 24 * 60 * 60 * 1000  // 7 days
+    maxAge:   7 * 24 * 60 * 60 * 1000  // 7 days in ms
   }
 }));
 
