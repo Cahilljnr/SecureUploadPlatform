@@ -30,7 +30,7 @@ document.querySelectorAll('.toggle-pw').forEach(btn => {
   try {
     const res  = await fetch('/api/auth/me');
     const data = await res.json();
-    if (data.loggedIn) window.location.replace('/');
+    if (data.loggedIn) window.location.replace('/index.html');
   } catch { /* ignore */ }
 })();
 
@@ -55,7 +55,7 @@ document.getElementById('loginForm').addEventListener('submit', async e => {
     const data = await res.json();
 
     if (!res.ok) return showError('loginError', data.error || 'Login failed.');
-    window.location.replace('/');
+    window.location.replace('/index.html');
 
   } catch {
     showError('loginError', 'Network error. Please try again.');
@@ -94,7 +94,7 @@ document.getElementById('registerForm').addEventListener('submit', async e => {
     const data = await res.json();
 
     if (!res.ok) return showError('registerError', data.error || 'Registration failed.');
-    window.location.replace('/');
+    window.location.replace('/index.html');
 
   } catch {
     showError('registerError', 'Network error. Please try again.');

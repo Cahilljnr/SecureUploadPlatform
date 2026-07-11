@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SecureVault – Shared File</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .share-wrapper {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+      background: var(--bg, #0f172a);
+    }
+    .share-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 2.5rem;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    }
+    .share-brand {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 1.5rem;
+    }
+    .share-file-info {
+      background: #0f172a;
+      border-radius: 10px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 1.5rem;
+    }
+    .share-file-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #f1f5f9;
+      word-break: break-all;
+    }
+    .share-file-meta {
+      font-size: .8rem;
+      color: #94a3b8;
+      margin-top: .35rem;
+    }
+    .share-label {
+      font-size: .85rem;
+      color: #94a3b8;
+      margin-bottom: .4rem;
+      display: block;
+    }
+    .share-key-row {
+      display: flex;
+      gap: .5rem;
+      margin-bottom: 1rem;
+    }
+    .share-key-row input {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .65rem .9rem;
+      color: #f1f5f9;
+      font-size: .9rem;
+      outline: none;
+    }
+    .share-key-row input:focus { border-color: #6366f1; }
+    .share-key-row button {
+      background: transparent;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: .65rem .8rem;
+      color: #94a3b8;
+      cursor: pointer;
+      font-size: .95rem;
+    }
+    .share-key-row button:hover { border-color: #6366f1; color: #f1f5f9; }
+    .btn-decrypt {
+      width: 100%;
+      padding: .85rem;
+      background: linear-gradient(135deg, #6366f1, #4f46e5);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: .95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .2s;
+    }
+    .btn-decrypt:hover { opacity: .9; }
+    .btn-decrypt:disabled { opacity: .5; cursor: not-allowed; }
+    .share-error {
+      background: rgba(239,68,68,.12);
+      border: 1px solid rgba(239,68,68,.3);
+      border-radius: 8px;
+      padding: .7rem 1rem;
+      color: #fca5a5;
+      font-size: .85rem;
+      margin-bottom: 1rem;
+    }
+    .share-success {
+      text-align: center;
+      padding: 1.5rem 0 .5rem;
+    }
+    .share-success p { color: #94a3b8; font-size: .85rem; margin-top: .5rem; }
+    .btn-download {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: .75rem 2rem;
+      background: #10b981;
+      border-radius: 10px;
+      color: #fff;
+      font-weight: 600;
+      text-decoration: none;
+      font-size: .95rem;
+    }
+    .loading-msg { text-align: center; color: #94a3b8; padding: 2rem 0; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="share-wrapper">
+    <div class="share-card">
+      <div class="share-brand">
+        <span>🔐</span> SecureVault
+      </div>
+
+      <div id="loadingMsg" class="loading-msg">Loading file info…</div>
+      <div id="errorMsg" class="share-error hidden"></div>
+
+      <div id="mainContent" class="hidden">
+        <div class="share-file-info">
+          <div class="share-file-name" id="fileName"></div>
+          <div class="share-file-meta" id="fileMeta"></div>
+        </div>
+
+        <div id="decryptSection">
+          <label class="share-label">🔑 Enter the encryption key to decrypt this file</label>
+          <div class="share-key-row">
+            <input type="password" id="keyInput" placeholder="Paste the encryption key here…" autocomplete="off" />
+            <button id="toggleKey" title="Show/hide key">👁</button>
+          </div>
+          <div id="decryptError" class="share-error hidden"></div>
+          <button class="btn-decrypt" id="decryptBtn">🔓 Decrypt &amp; Download</button>
+        </div>
+
+        <div id="successSection" class="share-success hidden">
+          <div style="font-size:2.5rem">✅</div>
+          <strong style="color:#f1f5f9">File decrypted successfully!</strong>
+          <p>Your file is ready to download.</p>
+          <a id="downloadLink" class="btn-download" download>⬇️ Download File</a>
+        </div>
+      </div>
+
+      <p style="text-align:center;margin-top:1.5rem;font-size:.78rem;color:#475569">
+        Files are encrypted end-to-end with AES-256-GCM.<br>
+        The server never sees your key or your data.
+      </p>
+    </div>
+  </div>
+
+  <script src="crypto.js"></script>
+  <script>
+    const fileId = window.location.pathname.split('/').pop();
+
+    const loadingMsg    = document.getElementById('loadingMsg');
+    const errorMsg      = document.getElementById('errorMsg');
+    const mainContent   = document.getElementById('mainContent');
+    const fileName      = document.getElementById('fileName');
+    const fileMeta      = document.getElementById('fileMeta');
+    const keyInput      = document.getElementById('keyInput');
+    const toggleKey     = document.getElementById('toggleKey');
+    const decryptBtn    = document.getElementById('decryptBtn');
+    const decryptError  = document.getElementById('decryptError');
+    const decryptSection = document.getElementById('decryptSection');
+    const successSection = document.getElementById('successSection');
+    const downloadLink  = document.getElementById('downloadLink');
+
+    // Load file metadata
+    (async () => {
+      try {
+        const res  = await fetch(`/api/share/${fileId}`);
+        const data = await res.json();
+        if (!res.ok) {
+          loadingMsg.classList.add('hidden');
+          errorMsg.textContent = data.error || 'File not found.';
+          errorMsg.classList.remove('hidden');
+          return;
+        }
+        loadingMsg.classList.add('hidden');
+        fileName.textContent = data.originalName;
+        fileMeta.textContent =
+          `${formatBytes(data.size)} · Uploaded ${new Date(data.uploadedAt).toLocaleString()} · by ${data.uploadedBy} · 🔐 ${data.layers}-layer AES-256`;
+        mainContent.classList.remove('hidden');
+      } catch (e) {
+        loadingMsg.classList.add('hidden');
+        errorMsg.textContent = 'Could not load file info. Please try again.';
+        errorMsg.classList.remove('hidden');
+      }
+    })();
+
+    // Toggle key visibility
+    toggleKey.addEventListener('click', () => {
+      keyInput.type = keyInput.type === 'password' ? 'text' : 'password';
+      toggleKey.textContent = keyInput.type === 'password' ? '👁' : '🙈';
+    });
+
+    // Decrypt & download
+    decryptBtn.addEventListener('click', async () => {
+      const passphrase = keyInput.value.trim();
+      if (!passphrase) {
+        decryptError.textContent = 'Please enter the encryption key.';
+        decryptError.classList.remove('hidden');
+        return;
+      }
+      decryptError.classList.add('hidden');
+      decryptBtn.disabled = true;
+      decryptBtn.textContent = '⏳ Decrypting…';
+
+      try {
+        // Get server-decrypted (but still client-encrypted) blob
+        const res  = await fetch(`/api/share/${fileId}/decrypt`, { method: 'POST' });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to retrieve file.');
+
+        // Client-side decrypt with user's passphrase
+        const clientEncBytes = ClientCrypto.fromBase64(json.clientEncrypted);
+        const decrypted      = await ClientCrypto.decrypt(clientEncBytes, passphrase);
+
+        // Create download link
+        const blob = new Blob([decrypted], { type: json.mimeType || 'application/octet-stream' });
+        const url  = URL.createObjectURL(blob);
+        downloadLink.href     = url;
+        downloadLink.download = json.originalName.replace(/\.enc$/, '');
+
+        decryptSection.classList.add('hidden');
+        successSection.classList.remove('hidden');
+
+      } catch (err) {
+        decryptError.textContent = 'Decryption failed. Wrong key or corrupted file.';
+        decryptError.classList.remove('hidden');
+        decryptBtn.disabled = false;
+        decryptBtn.textContent = '🔓 Decrypt & Download';
+      }
+    });
+
+    function formatBytes(b) {
+      if (!b) return '0 B';
+      const k = 1024, s = ['B','KB','MB','GB'], i = Math.floor(Math.log(b)/Math.log(k));
+      return (b/Math.pow(k,i)).toFixed(1)+' '+s[i];
+    }
+  </script>
+</body>
+</html>

@@ -82,6 +82,35 @@ const ClientCrypto = (() => {
   }
 
   /**
+   * Decrypt data encrypted by the encrypt() function above.
+   * @param {Uint8Array} data  – salt(16) | iv(12) | ciphertext
+   * @param {string}     passphrase
+   * @returns {Promise<Uint8Array>}
+   */
+  async function decrypt(data, passphrase) {
+    const salt       = data.slice(0, SALT_LENGTH);
+    const iv         = data.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
+    const ciphertext = data.slice(SALT_LENGTH + IV_LENGTH);
+    const key        = await deriveKey(passphrase, salt);
+    const plainBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      ciphertext
+    );
+    return new Uint8Array(plainBuffer);
+  }
+
+  /**
+   * Convert a Base64 string back to a Uint8Array.
+   */
+  function fromBase64(b64) {
+    const binary = atob(b64);
+    const bytes  = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  /**
    * Convert a Uint8Array to a Base64 string (for transport as form field).
    */
   function toBase64(uint8Array) {
@@ -92,5 +121,5 @@ const ClientCrypto = (() => {
     return btoa(binary);
   }
 
-  return { encrypt, generatePassphrase, toBase64 };
+  return { encrypt, decrypt, generatePassphrase, toBase64, fromBase64 };
 })();

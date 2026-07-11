@@ -179,7 +179,7 @@ async function uploadFiles(passphrase) {
       const res  = await fetch('/api/upload', { method: 'POST', body: formData });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Upload failed');
-      results.push({ name: file.name, id: json.id, ok: true });
+      results.push({ name: file.name, id: json.id, shareUrl: json.shareUrl, ok: true });
 
     } catch (err) {
       results.push({ name: file.name, ok: false, error: err.message });
@@ -191,9 +191,14 @@ async function uploadFiles(passphrase) {
   const bad = results.filter(r => !r.ok);
 
   let html = `<strong>✅ ${ok.length} file(s) encrypted &amp; uploaded</strong>`;
-  if (ok.length)  html += '<ul style="margin:.5rem 0 0 1rem">' + ok.map(r  => `<li>${escHtml(r.name)} <code style="font-size:.75rem;opacity:.7">[${r.id.slice(0,8)}…]</code></li>`).join('') + '</ul>';
+  if (ok.length)  html += '<ul style="margin:.5rem 0 0 1rem">' + ok.map(r => `
+    <li>
+      ${escHtml(r.name)} <code style="font-size:.75rem;opacity:.7">[${r.id.slice(0,8)}…]</code><br>
+      <span style="font-size:.8rem">🔗 Share link: <a href="${r.shareUrl}" target="_blank" style="color:#60a5fa">${window.location.origin}${r.shareUrl}</a>
+      <button onclick="copyToClipboard('${window.location.origin}${r.shareUrl}')" style="margin-left:.5rem;font-size:.75rem;padding:.15rem .4rem;border-radius:4px;border:1px solid #60a5fa;background:transparent;color:#60a5fa;cursor:pointer">Copy</button></span>
+    </li>`).join('') + '</ul>';
   if (bad.length) html += `<br><strong style="color:#fca5a5">❌ ${bad.length} failed:</strong><ul style="margin:.3rem 0 0 1rem">` + bad.map(r => `<li>${escHtml(r.name)}: ${escHtml(r.error)}</li>`).join('') + '</ul>';
-  html += `<br><span style="font-size:.82rem;opacity:.7">🔑 Keep your key: <code>${encKeyInput.value}</code></span>`;
+  html += `<br><span style="font-size:.82rem;opacity:.7">🔑 Keep your key — anyone with the link also needs it to decrypt: <code>${encKeyInput.value}</code></span>`;
 
   showResult('success', html);
   selectedFiles = [];
@@ -219,10 +224,12 @@ async function uploadText(text, passphrase) {
     if (!res.ok) throw new Error(json.error || 'Upload failed');
 
     setProgress('Done!', 100);
+    const shareUrl = `${window.location.origin}/share/${json.id}`;
     showResult('success',
       `<strong>✅ Text encrypted &amp; uploaded</strong><br>
-       ID: <code>${json.id}</code> &nbsp;·&nbsp; ${new Date(json.uploadedAt).toLocaleString()}<br>
-       <span style="font-size:.82rem;opacity:.7">🔑 Key: <code>${encKeyInput.value}</code></span>`
+       🔗 Share link: <a href="/share/${json.id}" target="_blank" style="color:#60a5fa">${shareUrl}</a>
+       <button onclick="copyToClipboard('${shareUrl}')" style="margin-left:.5rem;font-size:.75rem;padding:.15rem .4rem;border-radius:4px;border:1px solid #60a5fa;background:transparent;color:#60a5fa;cursor:pointer">Copy</button><br>
+       <span style="font-size:.82rem;opacity:.7">🔑 Key needed to decrypt: <code>${encKeyInput.value}</code></span>`
     );
     textInput.value = '';
   } catch (err) {
@@ -310,6 +317,14 @@ function getFileIcon(m) {
 }
 function escHtml(s='') {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Link copied!');
+  } catch {
+    showToast('Copy failed – please copy manually.', true);
+  }
 }
 function showToast(msg, isError=false) {
   const t = document.createElement('div');

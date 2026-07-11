@@ -216,11 +216,20 @@ app.post('/api/upload', requireAuth, uploadLimiter, upload.single('file'), async
     // Store encrypted file in Redis (base64 encoded)
     await redisClient.set(`file:${id}`, doubleEncrypted.toString('base64'));
 
+    // Save share record so anyone with the link can access it
+    await redisClient.set(`share:${id}`, JSON.stringify({
+      id, originalName, mimeType,
+      size:       rawBuffer.length,
+      uploadedAt: timestamp,
+      uploadedBy: req.session.username,
+      layers:     2
+    }));
+
     const manifest = await readManifest(req.session.userId);
     manifest.unshift({ id, originalName, mimeType, size: rawBuffer.length, uploadedAt: timestamp, encrypted: true, layers: 2 });
     await writeManifest(req.session.userId, manifest);
 
-    res.status(200).json({ success: true, id, message: 'Encrypted and stored.', uploadedAt: timestamp });
+    res.status(200).json({ success: true, id, shareUrl: `/share/${id}`, message: 'Encrypted and stored.', uploadedAt: timestamp });
 
   } catch (err) {
     console.error('Upload error:', err);
@@ -243,7 +252,75 @@ app.get('/api/stats', requireAuth, async (req, res) => {
   res.json({ totalUploads: manifest.length, totalSizeMB: (totalSize / (1024 * 1024)).toFixed(2) });
 });
 
+// GET /api/share/:id – public metadata for shared file (no auth required)
+app.get('/api/share/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Look up share record
+    const shareData = await redisClient.get(`share:${id}`);
+    if (!shareData) return res.status(404).json({ error: 'File not found or link has expired.' });
+    const share = JSON.parse(shareData);
+    // Return only metadata, never the encrypted bytes
+    res.json({
+      id:           share.id,
+      originalName: share.originalName,
+      mimeType:     share.mimeType,
+      size:         share.size,
+      uploadedAt:   share.uploadedAt,
+      uploadedBy:   share.uploadedBy,
+      layers:       share.layers
+    });
+  } catch (err) {
+    console.error('Share lookup error:', err);
+    res.status(500).json({ error: 'Could not retrieve file info.' });
+  }
+});
+
+// POST /api/share/:id/decrypt – submit key, get decrypted file (public)
+app.post('/api/share/:id/decrypt', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const shareData = await redisClient.get(`share:${id}`);
+    if (!shareData) return res.status(404).json({ error: 'File not found.' });
+    const share = JSON.parse(shareData);
+
+    // Fetch the doubly-encrypted blob from Redis
+    const encB64 = await redisClient.get(`file:${id}`);
+    if (!encB64) return res.status(404).json({ error: 'File data not found.' });
+
+    // Strip server-side encryption layer
+    const encBuffer = Buffer.from(encB64, 'base64');
+    const key    = crypto.scryptSync(process.env.SERVER_SECRET || 'change-me-in-production', 'sv1', 32);
+    const iv     = encBuffer.slice(0, 12);
+    const tag    = encBuffer.slice(12, 28);
+    const data   = encBuffer.slice(28);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const clientEncrypted = Buffer.concat([decipher.update(data), decipher.final()]);
+
+    // Return the client-encrypted blob — the browser will decrypt with the user's key
+    res.json({
+      clientEncrypted: clientEncrypted.toString('base64'),
+      originalName:    share.originalName,
+      mimeType:        share.mimeType
+    });
+  } catch (err) {
+    console.error('Decrypt error:', err);
+    res.status(500).json({ error: 'Could not retrieve file.' });
+  }
+});
+
 // ── Fallback – serve frontend ─────────────────────────────────────────────────
+// Root always goes to login first; authenticated users are redirected by app.js
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Shared file view – public, no auth required
+app.get('/share/:id', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'share.html'));
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
