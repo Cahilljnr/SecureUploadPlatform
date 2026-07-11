@@ -288,24 +288,35 @@ app.post('/api/share/:id/decrypt', async (req, res) => {
     const encB64 = await redisClient.get(`file:${id}`);
     if (!encB64) return res.status(404).json({ error: 'File data not found.' });
 
-    // Strip server-side encryption layer
+    // Strip server-side encryption layer: layout is iv(12) | tag(16) | ciphertext
     const encBuffer = Buffer.from(encB64, 'base64');
-    const key    = crypto.scryptSync(process.env.SERVER_SECRET || 'change-me-in-production', 'sv1', 32);
-    const iv     = encBuffer.slice(0, 12);
-    const tag    = encBuffer.slice(12, 28);
-    const data   = encBuffer.slice(28);
+    const key      = crypto.scryptSync(process.env.SERVER_SECRET || 'change-me-in-production', 'sv1', 32);
+    const iv       = encBuffer.slice(0, 12);
+    const tag      = encBuffer.slice(12, 28);
+    const ciphered = encBuffer.slice(28);
+
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(tag);
-    const clientEncrypted = Buffer.concat([decipher.update(data), decipher.final()]);
 
-    // Return the client-encrypted blob — the browser will decrypt with the user's key
+    let clientEncrypted;
+    try {
+      clientEncrypted = Buffer.concat([decipher.update(ciphered), decipher.final()]);
+    } catch (e) {
+      console.error('Server-layer decrypt failed:', e.message);
+      return res.status(500).json({ error: 'Server decryption failed. The SERVER_SECRET may have changed.' });
+    }
+
+    // Strip .enc suffix from original name for download
+    const cleanName = share.originalName.replace(/\.enc$/i, '');
+
+    // Return the client-encrypted blob — the browser decrypts with the user's key
     res.json({
       clientEncrypted: clientEncrypted.toString('base64'),
-      originalName:    share.originalName,
+      originalName:    cleanName,
       mimeType:        share.mimeType
     });
   } catch (err) {
-    console.error('Decrypt error:', err);
+    console.error('Share decrypt error:', err);
     res.status(500).json({ error: 'Could not retrieve file.' });
   }
 });

@@ -234,19 +234,28 @@
 
         // Client-side decrypt with user's passphrase
         const clientEncBytes = ClientCrypto.fromBase64(json.clientEncrypted);
-        const decrypted      = await ClientCrypto.decrypt(clientEncBytes, passphrase);
+        let decrypted;
+        try {
+          decrypted = await ClientCrypto.decrypt(clientEncBytes, passphrase);
+        } catch (e) {
+          decryptError.textContent = '❌ Wrong encryption key. Please check the key and try again.';
+          decryptError.classList.remove('hidden');
+          decryptBtn.disabled = false;
+          decryptBtn.textContent = '🔓 Decrypt & Download';
+          return;
+        }
 
         // Create download link
         const blob = new Blob([decrypted], { type: json.mimeType || 'application/octet-stream' });
         const url  = URL.createObjectURL(blob);
         downloadLink.href     = url;
-        downloadLink.download = json.originalName.replace(/\.enc$/, '');
+        downloadLink.download = json.originalName;
 
         decryptSection.classList.add('hidden');
         successSection.classList.remove('hidden');
 
       } catch (err) {
-        decryptError.textContent = 'Decryption failed. Wrong key or corrupted file.';
+        decryptError.textContent = err.message || 'Something went wrong. Please try again.';
         decryptError.classList.remove('hidden');
         decryptBtn.disabled = false;
         decryptBtn.textContent = '🔓 Decrypt & Download';
